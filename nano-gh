@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Ensure GitHub CLI is authenticated
 if ! gh auth status >/dev/null 2>&1; then
