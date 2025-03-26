@@ -1,0 +1,75 @@
+#!/bin/sh
+
+# Ensure GitHub CLI is authenticated
+if ! gh auth status >/dev/null 2>&1; then
+    notify-send -u critical -i dialog-error "GitHub CLI" "**Error: You are not authenticated!**"
+    exit 1
+fi
+
+# If GITHUB_REPO is not set, prompt the user to select a repo
+if [ -z "$GITHUB_REPO" ]; then
+    echo "Fetching your GitHub repositories..."
+    REPO_LIST=$(gh repo list --limit 50 --json nameWithOwner --jq '.[].nameWithOwner')
+
+    if [ -z "$REPO_LIST" ]; then
+        notify-send -u critical -i dialog-error "GitHub CLI" "**Error: No repositories found!**"
+        exit 1
+    fi
+
+    echo "Select a repository:"
+    echo "$REPO_LIST" | nl -w2 -s'. '  # Numbered list
+
+    read -p "Enter number: " REPO_INDEX
+    GITHUB_REPO=$(echo "$REPO_LIST" | sed -n "${REPO_INDEX}p")
+
+    if [ -z "$GITHUB_REPO" ]; then
+        echo "Invalid selection. Exiting."
+        exit 1
+    fi
+
+    export GITHUB_REPO
+    echo "Using repository: $GITHUB_REPO"
+fi
+
+# Ensure a file is specified
+if [ -z "$1" ]; then
+    echo "Usage: $0 <file>"
+    exit 1
+fi
+
+FILE="$1"
+REPO_DIR="${HOME}/github_repos/$(basename "$GITHUB_REPO")"
+
+# Clone repo if it doesn't exist locally
+if [ ! -d "$REPO_DIR/.git" ]; then
+    echo "Cloning repository into $REPO_DIR..."
+    mkdir -p "$REPO_DIR"
+    gh repo clone "$GITHUB_REPO" "$REPO_DIR"
+fi
+
+cd "$REPO_DIR" || exit 1
+
+# Ensure we're on the dev branch
+if ! git show-ref --verify --quiet refs/heads/dev; then
+    echo "Creating dev branch..."
+    git checkout -b dev
+    git push -u origin dev
+else
+    git checkout dev
+    git pull origin dev
+fi
+
+# Open the file with nano
+nano "$FILE"
+
+# Add, commit, and push changes in the background
+(
+    git add "$FILE"
+    git commit -m "Auto-commit: Updated $FILE"
+    
+    if git push origin dev; then
+        notify-send -i dialog-information "GitHub Sync" "Successfully pushed changes to $GITHUB_REPO (dev branch)."
+    else
+        notify-send -u critical -i dialog-error "GitHub Sync Failed" "**Error: Could not push changes to $GITHUB_REPO (dev branch)!**"
+    fi
+) & disown
